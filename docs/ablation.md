@@ -1,39 +1,26 @@
 # iOS 端 UI 闸门消融实验（R0–R7）
 
-> 目标：确定 iOS 端让 ZEEHO App 显示完整骑行分析所需的最小字段集合。
-> 结论：**最小充分集 = F1 + F2**；F3 / F4 / F5 冗余，已全部移除。
+> 完整过程、逐轮日志与汇总表见仓库根目录 `ablation/`（**本地工作目录，已被 `.gitignore` 忽略，含 VIN 等个人信息，不入库**）。
 
-## 候选字段
+**结论：iOS 端最小充分集 = F1 + F2**，已落地到 `scripts/ZeehoVehicleType.js`。
 
-| 代号 | 字段 | 期望效果 |
+| 代号 | 字段 | 效果 |
 | :--- | :--- | :--- |
-| F1 | `vehicleKinds = 2` | 「骑行分析」入口 + 极速显示 |
-| F2 | `cyclingEventStatisticFlag = true` | 加速 / 急刹 / 压弯显示 |
-| F3 | `iotProperties.vehicleTypeInfo.regulationType = 1` | （假定）车型合规类型 |
-| F4 | `iotProperties.vehicleTypeInfo.vehType = 1` | （假定）车辆大类 |
-| F5 | `vehicleType / vehicleTypeName / vehicleTypeDetailId` | （假定）车型三件套 |
+| F1 | `vehicleKinds = 2` | 「骑行分析」入口 + 极速 |
+| F2 | `cyclingEventStatisticFlag = true` | 加速 / 急刹 / 压弯 |
+| F3 / F4 / F5 | `regulationType` / `vehType` / `vehicleType` 三件套 | 经验证对 UI 无效，已移除 |
 
-## 实验矩阵
+消融实验矩阵（O0..O4 = UI 观测点）：
 
-`O0..O4` = 四个 UI 观测点是否出现；`Q1/Q2` = 次级观测；`MODE` = 实际生效的字段集。
+| 轮 | MODE | O0 | O1 | O2 | O3 | O4 |
+| :-- | :--- | :- | :- | :- | :- | :- |
+| R0 | none | 0 | 0 | 0 | 0 | 0 |
+| R1 | all | 1 | 1 | 1 | 1 | 1 |
+| R2 | F1 | 1 | 1 | 0 | 0 | 0 |
+| R3 | F2 | 0 | 0 | 1 | 1 | 1 |
+| R4 | F3 | 0 | 0 | 0 | 0 | 0 |
+| R5 | F4 | 0 | 0 | 0 | 0 | 0 |
+| R6 | F5 | 0 | 0 | 0 | 0 | 0 |
+| R7 | all-F2 | 1 | 1 | 0 | 0 | 0 |
 
-| 轮 | O0 | O1 | O2 | O3 | O4 | Q1 | Q2 | MODE |
-| :-- | :- | :- | :- | :- | :- | :- | :- | :--- |
-| R0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | none |
-| R1 | 1 | 1 | 1 | 1 | 1 | 0 | 1 | all |
-| R2 | 1 | 1 | 0 | 0 | 0 | 2 | 1 | F1 |
-| R3 | 0 | 0 | 1 | 1 | 1 | 0 | 1 | F2 |
-| R4 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | F3 |
-| R5 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | F4 |
-| R6 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | F5 |
-| R7 | 1 | 1 | 0 | 0 | 0 | 1 | 1 | all-F2 |
-
-## 结论
-
-- **R2（仅 F1）**：O0/O1 出现（入口 + 极速）→ F1 负责入口与极速。
-- **R3（仅 F2）**：O2/O3/O4 出现（加速/急刹/压弯）→ F2 负责事件统计。
-- **R4/R5/R6（仅 F3/F4/F5）**：所有 O0..O4 均为 0 → 三者对 UI **无效**。
-- **R7（all − F2）**：O2/O3/O4 消失，仅 O0/O1 在 → 再次确认 F2 是事件显示的唯一来源。
-
-⇒ 生产脚本只保留 F1 + F2；`vehicleType` 等保持服务端原值（AE5i Pro），App 不再误认车型。
-消融实验载体见 `experiments/ZeehoVehicleType.ablation.js`（`MODE` 常量切换各轮）。
+R2 证 F1 管入口/极速，R3 证 F2 管事件统计；R4–R6 单开 F3/F4/F5 全为 0，R7 去掉 F2 后事件消失 → F2 为事件显示唯一来源。`vehicleType` 保持服务端原值（AE5i Pro）。
