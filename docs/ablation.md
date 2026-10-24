@@ -1,6 +1,6 @@
 # iOS 端 UI 闸门消融实验（R0–R7）
 
-> 完整过程、逐轮日志与汇总表见仓库根目录 `ablation/`（**本地工作目录，已被 `.gitignore` 忽略，含 VIN 等个人信息，不入库**）。
+> 完整过程与结果见仓库根目录 `ablation/`（**本地工作目录，已被 `.gitignore` 忽略，不入库**）。
 
 **结论：iOS 端最小充分集 = F1 + F2**，已落地到 `scripts/ZeehoVehicleType.js`。
 

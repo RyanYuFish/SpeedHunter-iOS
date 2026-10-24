@@ -43,16 +43,8 @@ SpeedHunter-iOS/
 │   ├── ZeehoVehicleType.js  # 生产：F1+F2 gate
 │   ├── ZeehoRideFill.js     # 生产：轨迹估算+回填
 │   ├── ZeehoOTA.js          # 禁用：OTA 红点重放
-│   └── debug/               # 调试脚本（默认禁用）
-│       ├── ZeehoClearStore.js
-│       ├── ZeehoCalibProbe.js
-│       ├── ZeehoProbe.js
-│       ├── ZeehoDebug.js
-│       ├── ZeehoFindSwitch.js
-│       └── ZeehoWidgetsProbe.js
-├── experiments/
-│   ├── ZeehoVehicleType.legacy.js
-│   └── ZeehoVehicleType.ablation.js
+│   └── debug/
+│       └── ZeehoDebug.js    # 调试探针（默认禁用）
 ├── docs/
 │   ├── ablation.md
 │   └── changelog.md
@@ -60,7 +52,7 @@ SpeedHunter-iOS/
 └── .gitignore
 ```
 
-调试脚本只记录、不改写响应，默认禁用，按需启用。
+调试探针 `ZeehoDebug.js` 只记录、不改写响应，默认禁用，按需启用。
 
 ## 安全与隐私
 
