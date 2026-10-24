@@ -41,9 +41,6 @@ ZeehoVehicleType = type=http-response,engine=jsc,script-path=scripts/ZeehoVehicl
 # 轨迹估算+回填（生产，默认开）
 ZeehoRideFill = type=http-response,engine=jsc,script-path=scripts/ZeehoRideFill.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=60,script-update-interval=0,enable=true
 
-# OTA 红点重放（高风险，默认关；详见 scripts/ZeehoOTA.js 头部说明）
-# ZeehoOTA = type=http-response,engine=jsc,script-path=scripts/ZeehoOTA.js,pattern=.*tapi\.zeehoev\.com.*red-point/content.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
-
 [MITM]
 h2 = false
 ca-passphrase = <YOUR_CERT_PASSPHRASE>

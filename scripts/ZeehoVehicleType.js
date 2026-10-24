@@ -1,13 +1,10 @@
 /*
- * ZeehoVehicleType.min.js —— 消融实验定稿版（2026-09-28）
- *
- * 8 轮消融（R0-R7）结论：iOS 端只有两个独立 gate，最小充分集 = F1 + F2：
+ * ZeehoVehicleType.js
  *   F1  vehicleKinds = 2                 → 「骑行分析」入口 + 极速 显示
  *   F2  cyclingEventStatisticFlag = true → 加速 / 急刹 / 压弯 显示
- * F3(regulationType) / F4(vehType) / F5(vehicleType 三件套) 已证实冗余，全部移除
- * —— vehicleType 保持服务端原值（AE5i Pro），App 不再误认车型。
+ * F3(regulationType) / F4(vehType) / F5(vehicleType) 冗余
+ * —— vehicleType 保持服务端原值，App 不再误认车型。
  *
- * 依据：iOS-rocket/ablation-test/ABLATION-RESULTS.md
  */
 
 function log(s) { console.log("[ZeehoVT] " + s); }

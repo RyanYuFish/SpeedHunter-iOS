@@ -8,11 +8,10 @@ iOS 端 Shadowrocket 模块与脚本集合，通过对少量 HTTP 响应做 MITM
 | :-- | :--- | :--- |
 | 1 | **ZeehoVehicleType** | UI 能力闸门：在 `vehicleHomePageV2` / `vehicle/list` 设置 `vehicleKinds = 2` + `cyclingEventStatisticFlag = true` → 显示「骑行分析」入口、极速、加速/急刹/压弯。 |
 | 2 | **ZeehoRideFill** | 由 `ridetrack_v2` 轨迹点估算急刹与压弯次数，用按日缓存回填 `myRideInfo` / `homeRideInfo` / `analyse`。 |
-| 3 | **ZeehoOTA** | OTA 红点重放——显式同版本升级通知。**默认关闭，风险高，保持关闭。** 见文件头部说明。 |
 
 ## 消融实验
 
-8 轮消融（R0–R7）证明 iOS 端最小充分集为 **F1 + F2**；`regulationType`(F3)、`vehType`(F4)、`vehicleType` 三件套(F5) 均冗余已移除，`vehicleType` 保持服务端原值（AE5i Pro）。详见 [docs/ablation.md](docs/ablation.md)。
+8 轮消融（R0–R7）证明 iOS 端最小充分集为 **F1 + F2**；`regulationType`(F3)、`vehType`(F4)、`vehicleType` 三件套(F5) 均冗余已移除，`vehicleType` 保持服务端原值。详见 [docs/ablation.md](docs/ablation.md)。
 
 ## 使用前准备
 
@@ -42,7 +41,6 @@ SpeedHunter-iOS/
 ├── scripts/
 │   ├── ZeehoVehicleType.js  # 生产：F1+F2 gate
 │   ├── ZeehoRideFill.js     # 生产：轨迹估算+回填
-│   ├── ZeehoOTA.js          # 禁用：OTA 红点重放
 │   └── debug/
 │       └── ZeehoDebug.js    # 调试探针（默认禁用）
 ├── docs/
@@ -58,8 +56,7 @@ SpeedHunter-iOS/
 
 - 不上传骑行记录、车辆信息、位置或账号数据；不修改 App、不绕过账号权限、不改变车辆控制逻辑；
 - 速度/事件数据仅用于界面显示，不能替代仪表或作为安全决策依据；**骑行时勿操作手机，也不要依赖本模块读数**；
-- 日志可能含 VIN、骑行记录、账号字段等个人信息——妥善保管且切勿提交（见 `.gitignore`）；
-- OTA 红点重放（ZeehoOTA）可能触发仪表刷写，刷机有变砖风险，除非完全理解后果否则保持关闭。
+- 日志可能含 VIN、骑行记录、账号字段等个人信息——妥善保管且切勿提交（见 `.gitignore`）。
 
 ## 非官方声明与许可
 

@@ -1,50 +1,34 @@
 /*
- * ZeehoRideFill.js v15
- * - ridetrack_v2: 逐条算 b/d，按 dayTime 聚合写
- * - myRideInfo:   按 date 读 store，覆盖 brakesTimesDay/bendingTimesDay
- *                 并累加覆盖 data.bendingTimesTotal（列表页顶部月度压弯总数）
- * - analyse:      按 rideMonth 聚合 store，覆盖 brakesTimes/bendingTimes
- * - vehicleHomePageV2/vehicle/list: 维持 F1/F2 gate
+ * ZeehoRideFill.js
+ * 由 ridetrack_v2 轨迹点估算急刹/压弯次数，按日缓存回填 myRideInfo / homeRideInfo / analyse。
+ * 估算函数：countBrakes()（急刹，固定）、countBends()（压弯）；日缓存：accumDay / readDay / writeDay。
  *
- * v15（基于 v14 + v13 压弯参数调参 + v12 全量重算）:
- *   - 顶部 PS/REQ/DONE 别名，全文只用短名，杜绝 $ 被吞导致的语法错误
- *   - 每个 API handler 独立 try-catch，互不牵连
- *   - JSON.parse 外层 try-catch，非 JSON 直接透传原 body
- *   - readDay/writeDay 内部 try-catch，store 不可用时降级
- *   - DEBUG 默认 false，避免 debugPrint 重算导致超时
- *   - C.LOG 保持 true，保留基础日志
+ * 调整压弯数据（countBends，参数均在下方 C 对象，改完直接生效）：
+ *   C.BEND_COEF        主旋钮，默认 1.00；>1 多计、<1 少计，日常标定只改这一个
+ *   C.BEND_V_MIN/MAX   判定压弯的车速区间（仅此区间内计弯）
+ *   C.BEND_SEED        起判单点转角阈值；C.BEND_STEP_MAX 超过则视为掉头/锯齿，跳过点
+ *   C.BEND_CUM_MIN/MAX 一段同向转角累计角度的下限/上限过滤
+ *   C.BEND_ALLOW_GAP / C.BEND_MERGE_GAP  相邻转弯的间隙容忍与同向合并容差
  *
- * v13 压弯参数:
- *   BEND_V_MIN: 25, BEND_V_MAX: 60, BEND_SEED: 10, BEND_STEP_MAX: 45
- *   BEND_CUM_MIN: 30, BEND_CUM_CAP: 90, BEND_RUN_MIN: 1
- *   BEND_ALLOW_GAP: 1, BEND_MERGE_GAP: 1
- *   BEND_SEG_DIST_MIN: 6, BEND_GAP_MS_MAX: 25000
- *
- * 急刹参数(v9定稿): V_MIN:15, WIN_LARGE:5, WIN_SMALL:3, DV_LARGE:15,
- *   DV_SMALL:20, A_MIN:0.5, MERGE_GAP:5, MIN_DUR:1.5, CALIB_FACTOR:2.5
- *
- * BEND_COEF: 1.00（>1 补漏，<1 压多，每次只改这一个）
- *
- * 标定记录:
- *   2026-10-03: v13 发布，压弯参数调参
- *   2026-10-04: v14 修复 $persistentStore/$request/$done 吞 $ 问题
- *   2026-10-04: v15 全局别名 + 防御性 try-catch + DEBUG 默认关
+ * 标定验证：
+ *   C.DEBUG = true 打开逐段诊断（日志前缀 [DBG]）；
+ *   C.TARGET_RIDE_IDS 填入 rideId 只看指定行程，留空数组则打印全部。
  */
 
-console.log("[ZeehoFill] START v15");
+console.log("[ZeehoFill] START");
 
-// ★ v15 别名：缓存关键全局对象，全文只用短名
+// 别名：缓存关键全局对象，全文只用短名
 var PS = $persistentStore;
 var REQ = $request;
-var RES = $response;    // ★ 新增
+var RES = $response;
 var DONE = $done;
 
 var C = {
-  // 急刹参数（v9 定稿，不动）
+  // 急刹参数（固定，不动）
   V_MIN: 15, WIN_LARGE: 5, WIN_SMALL: 3,
   DV_LARGE: 15, DV_SMALL: 20, A_MIN: 0.5,
   MERGE_GAP: 5, MIN_DUR: 1.5,
-  // 压弯参数（v16）
+  // 压弯参数
   BEND_V_MIN: 20,
   BEND_V_MAX: 80,
   BEND_SEED: 5,
@@ -59,7 +43,7 @@ var C = {
   CALIB_FACTOR: 2.5,
   BEND_COEF: 1.00,
   LOG: true,
-  // ★ v15: DEBUG 默认 false，标定参数时手动打开
+  // DEBUG 默认 false，标定参数时手动打开
   DEBUG: false
 };
 
@@ -67,7 +51,7 @@ function log(s) { if (C.LOG) console.log("[ZeehoFill] " + s); }
 function dbg(s) { if (C.DEBUG) console.log("[DBG] " + s); }
 function isZero(v) { return v === 0 || v === "0" || v === null || v === undefined; }
 
-// ★ 精确控制：只打印指定 rideId 的轨迹数据（留空数组 = 全部打印）
+// 精确控制：只打印指定 rideId 的轨迹数据（留空数组 = 全部打印）
 var TARGET_RIDE_IDS = [];
 
 function parseTraj(traj) {
@@ -104,7 +88,7 @@ function distM(lon1, lat1, lon2, lat2) {
   return R * c;
 }
 
-// ---- 急刹 countBrakes（v9 定稿，一行未动）----
+// ---- 急刹 countBrakes（固定）----
 function countBrakes(pts) {
   var n = pts.length; if (n < 4) return 0;
   var cands = [], i, j;
@@ -137,7 +121,7 @@ function countBrakes(pts) {
   return r < 0 ? 0 : r;
 }
 
-// ---- 压弯 countBends v13（累计转角法）----
+// ---- 压弯 countBends（累计转角法）----
 function countBends(pts) {
   if (!pts || pts.length < 4) return 0;
   var n = pts.length, i;
@@ -308,7 +292,7 @@ function patchGate(v) {
   if (v.cyclingEventStatisticFlag !== undefined) v.cyclingEventStatisticFlag = true;
 }
 
-// ---- day store（v15: 内部 try-catch 防御）----
+// ---- day store ----
 function dayKey(day) { return "zeeho_day_" + day; }
 function readDay(day) {
   try {
@@ -324,7 +308,7 @@ function accumDay(day, rideId, b, d) {
   var cur = readDay(day);
   if (!cur) cur = { b: 0, d: 0, rides: {} };
   if (!cur.rides) cur.rides = {};
-  // ★ v12 修复：移除 isZero 守卫，每次无条件覆盖
+  // 每次无条件覆盖写入
   cur.rides[rideId] = { b: b, d: d };
   // 重算日总计
   cur.b = 0; cur.d = 0;
@@ -366,18 +350,18 @@ function fillFromCache(entries, sourceName) {
 
 // ---- 主逻辑 ----
 (function () {
-  // ★ v15: 使用 REQ 别名（非 $request）
+  // 使用 REQ 别名（非 $request）
   var req = REQ || {};
   var url = req.url || "";
   var body = RES.body || "";
   try {
-    // ★ v15: JSON.parse 外层 try-catch
+    // JSON.parse 外层 try-catch
     var obj;
     try { obj = body ? JSON.parse(body) : {}; } catch (e) { log("JSON parse fail, pass through"); DONE({ body: body }); return; }
     var d = obj.data;
     if (!d) { DONE({ body: body }); return; }
 
-    // 1. Gate（v15: 独立 try-catch）
+    // 1. Gate
     try {
       if (url.indexOf("vehicleHomePageV2") > -1 || url.indexOf("vehicle/list") > -1) {
         if (Array.isArray(d)) { for (var i = 0; i < d.length; i++) patchGate(d[i]); }
@@ -385,7 +369,7 @@ function fillFromCache(entries, sourceName) {
       }
     } catch (e) { log("HANDLER ERROR gate: " + e); }
 
-    // 2. ridetrack_v2（v15: 独立 try-catch）
+    // 2. ridetrack_v2
     try {
       if (url.indexOf("ridetrack_v2") > -1 && Array.isArray(d)) {
         var filled = 0;
@@ -411,7 +395,7 @@ function fillFromCache(entries, sourceName) {
       }
     } catch (e) { log("HANDLER ERROR ridetrack_v2: " + e); }
 
-    // 3. myRideInfo（v15: 独立 try-catch）
+    // 3. myRideInfo
     try {
       if (url.indexOf("myRideInfo") > -1 && d && d.rideRecordList && Array.isArray(d.rideRecordList)) {
         var lst = d.rideRecordList, nFill = 0;
@@ -438,7 +422,7 @@ function fillFromCache(entries, sourceName) {
       }
     } catch (e) { log("HANDLER ERROR myRideInfo: " + e); }
 
-    // 4. analyse（v15: 独立 try-catch）
+    // 4. analyse
     try {
       if (url.indexOf("analyse") > -1 && d && d.rideMonth) {
         var m = d.rideMonth;
@@ -459,7 +443,7 @@ function fillFromCache(entries, sourceName) {
       }
     } catch (e) { log("HANDLER ERROR analyse: " + e); }
 
-    // ★ v15: 使用 DONE 别名
+    // 使用 DONE 别名
     DONE({ body: JSON.stringify(obj) });
   } catch (e) {
     log("FATAL " + e);
