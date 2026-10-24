@@ -2,14 +2,11 @@
 #
 # 用法：
 #   1. 复制本文件为 conf/Zeeho.conf（该文件已被 .gitignore 忽略，不会被提交）
-#   2. 在 [MITM] 段填入你自己的证书：
-#        - ca-p12：Shadowrocket 生成的 MITM 证书（base64，在 App 内
-#          「HTTPS 解密 → 导出证书」获得，或通过其它方式生成）
-#        - ca-passphrase：该证书的口令
+#   2. 在 [MITM] 段填入你自己的证书（ca-p12 + ca-passphrase）
 #   3. 在 Shadowrocket 中导入 conf/Zeeho.conf，并开启「HTTPS 解密」
-#   4. [Script] 段脚本路径已指向仓库 scripts/ 目录，保持相对路径即可
+#   4. [Script] 段脚本路径已指向仓库 scripts/（生产）与 scripts/debug/（调试）
 #
-# 各脚本默认开关见 [Script] 段；生产环境只需 ZeehoVehicleType + ZeehoRideFill 启用。
+# 生产环境只需启用 ZeehoVehicleType + ZeehoRideFill；其余脚本默认禁用。
 
 [General]
 bypass-system = true
@@ -36,10 +33,10 @@ localhost = 127.0.0.1
 
 [Script]
 # 清空 persistentStore（调试用，默认关）
-ZeehoClearStore = type=http-response,engine=jsc,script-path=scripts/ZeehoClearStore.js,pattern=.*tapi\.zeehoev\.com.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
+ZeehoClearStore = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoClearStore.js,pattern=.*tapi\.zeehoev\.com.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
 
 # 标定探针：抓 ridetrack_v2/myRideInfo/homeRideInfo/analyse 响应（调试用，默认关）
-ZeehoCalibProbe = type=http-response,engine=jsc,script-path=scripts/ZeehoCalibProbe.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=10,script-update-interval=0,enable=false
+ZeehoCalibProbe = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoCalibProbe.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=10,script-update-interval=0,enable=false
 
 # UI gate 恢复：vehicleKinds=2 + cyclingEventStatisticFlag=true（生产，默认开）
 ZeehoVehicleType = type=http-response,engine=jsc,script-path=scripts/ZeehoVehicleType.js,pattern=.*tapi\.zeehoev\.com.*(vehicleHomePageV2|vehicle/list).*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=true
@@ -48,7 +45,12 @@ ZeehoVehicleType = type=http-response,engine=jsc,script-path=scripts/ZeehoVehicl
 ZeehoRideFill = type=http-response,engine=jsc,script-path=scripts/ZeehoRideFill.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=60,script-update-interval=0,enable=true
 
 # 全量探针：抓全部 zeehoev 请求（调试用，验证完可删或 enable=false）
-ZeehoProbe = type=http-response,engine=jsc,script-path=scripts/ZeehoProbe.js,pattern=.*zeehoev\.com.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
+ZeehoProbe = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoProbe.js,pattern=.*zeehoev\.com.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
+
+# 调试探针（默认关，按需启用）
+ZeehoDebug = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoDebug.js,pattern=.*tapi\.zeehoev\.com.*(myRideInfo|ridetrack_v2).*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
+ZeehoWidgetsProbe = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoWidgetsProbe.js,pattern=.*tapi\.zeehoev\.com.*vehicle/widgets.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
+ZeehoFindSwitch = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoFindSwitch.js,pattern=.*tapi\.zeehoev\.com.*vehicle/widgets.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
 
 # OTA 红点重放（高风险，默认关；详见 scripts/ZeehoOTA.js 头部说明）
 # ZeehoOTA = type=http-response,engine=jsc,script-path=scripts/ZeehoOTA.js,pattern=.*tapi\.zeehoev\.com.*red-point/content.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
