@@ -1,4 +1,4 @@
-# Shadowrocket 配置模板（已脱敏）
+# Shadowrocket 配置模板
 #
 # 用法：
 #   1. 复制本文件为 conf/Zeeho.conf（该文件已被 .gitignore 忽略，不会被提交）
@@ -40,6 +40,10 @@ ZeehoVehicleType = type=http-response,engine=jsc,script-path=scripts/ZeehoVehicl
 
 # 轨迹估算+回填（生产，默认开）
 ZeehoRideFill = type=http-response,engine=jsc,script-path=scripts/ZeehoRideFill.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=60,script-update-interval=0,enable=true
+
+# 自定义键映射为「切换信息组」：请求离机前把 commandCode 改写为 7（http-request 改写）
+# 启用 = 映射生效；禁用 = 完全不改写（原样发出，零副作用）
+ZeehoCustomKey = type=http-request,engine=jsc,script-path=scripts/ZeehoCustomKey.js,pattern=.*tapi\.zeehoev\.com.*dbpoint/send.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=true
 
 [MITM]
 h2 = false

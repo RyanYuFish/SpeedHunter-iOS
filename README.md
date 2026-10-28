@@ -8,6 +8,9 @@ iOS 端 Shadowrocket 模块与脚本集合，通过对少量 HTTP 响应做 MITM
 | :-- | :--- | :--- |
 | 1 | **ZeehoVehicleType** | UI 能力闸门：在 `vehicleHomePageV2` / `vehicle/list` 设置 `vehicleKinds = 2` + `cyclingEventStatisticFlag = true` → 显示「骑行分析」入口、极速、加速/急刹/压弯。 |
 | 2 | **ZeehoRideFill** | 由 `ridetrack_v2` 轨迹点估算急刹与压弯次数，用按日缓存回填 `myRideInfo` / `homeRideInfo` / `analyse`。 |
+| 3 | **ZeehoCustomKey** | 自定义键映射：在 `dbpoint/send` 请求**离机前**把 `commandCode` 强制改写为 **7（切换信息组）** → 仪表主页按自定义键在「里程组 ⇄ 胎压组」间切换，显示前后轮胎压 / 胎温。 |
+
+> **切换语义（#3）**：**启用**脚本 = 所有自定义键设置都被映射为「切换信息组」；**禁用**脚本 = 完全不改写请求，App 行为恢复原厂、零副作用。
 
 ## 消融实验
 
@@ -41,6 +44,7 @@ SpeedHunter-iOS/
 ├── scripts/
 │   ├── ZeehoVehicleType.js  # 生产：F1+F2 gate
 │   ├── ZeehoRideFill.js     # 生产：轨迹估算+回填
+│   ├── ZeehoCustomKey.js    # 生产：自定义键→切换信息组（http-request 改写）
 │   └── debug/
 │       └── ZeehoDebug.js    # 调试探针（默认禁用）
 ├── docs/
