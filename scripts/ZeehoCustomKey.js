@@ -2,11 +2,12 @@
  * ZeehoCustomKey.js
  * 自定义键强制为「切换信息组（功能码 7）」—— iOS 端 Shadowrocket 等价实现（对应 Android SpeedHunter v4.7/v4.7.1 的 customkey 包）。
  *
- * 机制（与 Android 完全一致）：
+ * 机制（与 Android 一致）：
  *   官方 App 保存自定义键时，走 4G 云端（tapi.zeehoev.com 的 dbpoint/send 通用网关，
- *   实测从不走 BLE），请求体里带一个 commandCode 字段。本脚本在请求离机前把
- *   commandCode 强制改写成 7（切换信息组），车端 SetItem4 落入 7，仪表主页按自定义键
- *   即在「里程组 ⇄ 胎压组」间切换，首页显示前后轮胎压 / 胎温。
+ *   实测从不走 BLE）。该网关的 body 结构是「外层 {eventId, param, uuid} + 内层 param
+ *   是 JSON 字符串」——功能码字段（commandCode / functionCode / keyCode / buttonCode）
+ *   实际藏在 param 字符串里。本脚本会先解析 param 再改写，把功能码强制改成 7（切换信息组），
+ *   车端 SetItem4 落入 7，仪表主页按自定义键即在「里程组 ⇄ 胎压组」间切换，首页显示前后轮胎压 / 胎温。
  *
  * 开关行为（满足「启用脚本则映射、关闭脚本则不修改」）：
  *   在 Shadowrocket 里【启用】本脚本 = 映射生效；【禁用】本脚本 = 完全不改写（原样发出）。
@@ -63,14 +64,26 @@ function rewrite(obj) {
   }
   for (var k in obj) {
     if (!obj.hasOwnProperty(k)) continue;
+    var v = obj[k];
     if (isCodeKey(k)) {
-      if (obj[k] !== TARGET) {
-        log("commandCode " + obj[k] + " -> " + TARGET + "（切换信息组）");
-        obj[k] = TARGET;
+      // 功能码字段：强制改为 TARGET，保持原类型（数字 → 7，字符串 → "7"）
+      var nv = (typeof v === "string") ? ("" + TARGET) : TARGET;
+      if (v !== nv) {
+        log("rewrite " + k + ": " + v + " -> " + nv + "（切换信息组）");
+        obj[k] = nv;
       }
       hit = true;
-    } else if (typeof obj[k] === "object" && obj[k] !== null) {
-      if (rewrite(obj[k])) hit = true;
+    } else if (typeof v === "object" && v !== null) {
+      if (rewrite(v)) hit = true;
+    } else if (typeof v === "string" && (v.charAt(0) === "{" || v.charAt(0) === "[")) {
+      // 嵌套 JSON 字符串（如 dbpoint/send 的 param 字段）：解析后递归改写再回写
+      try {
+        var sub = JSON.parse(v);
+        if (rewrite(sub)) {
+          obj[k] = JSON.stringify(sub);
+          hit = true;
+        }
+      } catch (e) { /* 不是 JSON，忽略 */ }
     }
   }
   return hit;
@@ -102,8 +115,17 @@ function bodyHasContext(bodyStr) {
       log("mapped custom-key -> switch-info (7) at " + url);
       DONE({ body: JSON.stringify(obj) });
     } else {
-      // 命中上下文但没找到功能码字段：可能字段名不同，开 DEBUG 看结构
-      log("context matched but no code field found; set DEBUG=true to inspect (URL=" + url + ")");
+      // 命中上下文但没找到功能码字段：打印结构便于定位真正的字段名
+      var topKeys = Object.keys(obj).join(",");
+      var innerKeys = "";
+      try {
+        var p = obj.param;
+        if (typeof p === "string") {
+          var pi = JSON.parse(p);
+          innerKeys = " | param keys=" + Object.keys(pi).join(",");
+        }
+      } catch (e) {}
+      log("context matched but no code field found; top keys=[" + topKeys + "]" + innerKeys + "; set DEBUG=true to inspect (URL=" + url + ")");
       DONE({});
     }
   } catch (e) {
