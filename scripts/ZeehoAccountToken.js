@@ -5,7 +5,8 @@
  * 来源：
  *   - token：H5 签到页 URL 的 token / access_token / satoken 参数，
  *            或请求的 Authorization: Bearer <token> / x-token / access-token 头；
- *   - userid：URL 的 userId / userid / user_id / uid 参数。
+ *   - userid：URL 的 userId / userid / user_id / uid 参数，
+ *            或请求 Cookie 头的 user_id / userId。
  *
  * 行为：type=http-request，只读、不改写请求（$done({})），
  *   命中后把两个值写入 $persistentStore 并打印「可复制」的一行。
@@ -64,6 +65,25 @@ function fromHeaders(headers) {
   return "";
 }
 
+function fromCookie(headers) {
+  if (!headers) return "";
+  var cookie = headers["Cookie"] || headers["cookie"];
+  if (!cookie) return "";
+  var names = ["user_id", "userId", "userid", "uid", "accountId"];
+  var parts = ("" + cookie).split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i].trim();
+    var eq = p.indexOf("=");
+    if (eq < 0) continue;
+    var k = p.slice(0, eq).trim().toLowerCase();
+    var v = p.slice(eq + 1).trim();
+    for (var j = 0; j < names.length; j++) {
+      if (k === names[j].toLowerCase()) return decode(v);
+    }
+  }
+  return "";
+}
+
 function mask(s) {
   if (!s) return "";
   if (s.length <= 8) return "****";
@@ -97,22 +117,23 @@ function save(token, userid, source) {
 (function () {
   try {
     var url = (REQ && REQ.url) || "";
+    var headers = REQ && REQ.headers;
     var u = fromUrl(url);
-    var token = u.token || fromHeaders(REQ && REQ.headers);
-    var userid = u.userid;
+    var token = u.token || fromHeaders(headers);
+    var userid = u.userid || fromCookie(headers);
 
     if (!token && !userid) {
       DONE({});
       return;
     }
     if (token && userid) {
-      save(token, userid, url.indexOf("h5.zeehoev.com") >= 0 ? "H5 URL" : "request");
+      save(token, userid, url.indexOf("h5.zeehoev.com") >= 0 ? "H5 URL+cookie" : "header+cookie");
     } else if (token) {
       // 只拿到 token：先存，账号 ID 等下次带 userId 的请求补上
       save(token, "", "header/url");
       log("token saved, waiting for a request with userId to complete the pair");
     } else {
-      save("", userid, "url");
+      save("", userid, "cookie/url");
       log("userid saved, waiting for Authorization/token to complete the pair");
     }
     DONE({});
