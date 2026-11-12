@@ -45,9 +45,12 @@ ZeehoRideFill = type=http-response,engine=jsc,script-path=scripts/ZeehoRideFill.
 # 启用 = 映射生效；禁用 = 完全不改写（原样发出，零副作用）
 ZeehoCustomKey = type=http-request,engine=jsc,script-path=scripts/ZeehoCustomKey.js,pattern=.*tapi\.zeehoev\.com.*dbpoint/send.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=true
 
+# 登录凭证提取：抓 token + 账号 ID 供 SpeedHunter Android「账号引导登录」填写（只读、不改写请求，默认开）
+ZeehoAccountToken = type=http-request,engine=jsc,script-path=scripts/ZeehoAccountToken.js,pattern=.*(h5|tapi)\.zeehoev\.com.*,max-size=0,requires-body=false,timeout=30,script-update-interval=0,enable=true
+
 [MITM]
 h2 = false
 ca-passphrase = <YOUR_CERT_PASSPHRASE>
 ca-p12 = <YOUR_MITM_CA_P12_BASE64>
 enable = true
-hostname = %APPEND% tapi.zeehoev.com
+hostname = %APPEND% tapi.zeehoev.com, h5.zeehoev.com

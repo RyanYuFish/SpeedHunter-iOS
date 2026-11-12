@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-12 — ZeehoAccountToken：自动提取登录凭证（新增脚本 #4）
+
+- 新增 `scripts/ZeehoAccountToken.js`（`type=http-request`）：从 ZEEHO 请求 URL /
+  请求头自动提取 `token`（`token` / `access_token` / `satoken` / `h5_token` 参数或
+  `Authorization: Bearer` / `x-token` / `access-token` 头）与账号 ID
+  （`userId` / `userid` / `user_id` / `uid` / `accountId` 参数），写入
+  `$persistentStore`（`zeeho_token` / `zeeho_userid`）并打印可复制的一行。
+- **替代原先做法**：之前靠手工翻 `logs/successPacketTunnel-*.log`、从 URL 里找字段
+  再复制填入；现在打开极核 App 进一次「我的 → 签到」即可在脚本日志里拿到。
+- 只读、不改写请求（`$done({})`）；禁用脚本即完全不采集，零副作用。
+  日志里 token 默认打码，需明文复制时把 `PRINT_FULL_TOKEN` 改为 `true`，用完改回。
+- `conf/Zeeho.conf` 与 `conf/Zeeho.conf.example`：`[Script]` 加 `ZeehoAccountToken`
+  条目（默认 `enable=true`），`[MITM] hostname` 追加 `h5.zeehoev.com`
+  （H5 签到页 URL 需解密才能读到 token）。既有脚本与证书配置不变。
+- 用途：尚未明确。
+
 ## 2026-10-28 — ZeehoCustomKey：自定义键映射为「切换信息组」（新增脚本 #3）
 
 - 新增 `scripts/ZeehoCustomKey.js`（`type=http-request`）：在 `dbpoint/send` 请求**离机前**把

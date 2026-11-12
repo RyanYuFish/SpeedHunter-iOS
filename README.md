@@ -9,6 +9,7 @@ iOS 端 Shadowrocket 模块与脚本集合，通过对少量 HTTP 响应做 MITM
 | 1 | **ZeehoVehicleType** | UI 能力闸门：在 `vehicleHomePageV2` / `vehicle/list` 设置 `vehicleKinds = 2` + `cyclingEventStatisticFlag = true` → 显示「骑行分析」入口、极速、加速/急刹/压弯。 |
 | 2 | **ZeehoRideFill** | 由 `ridetrack_v2` 轨迹点估算急刹与压弯次数，用按日缓存回填 `myRideInfo` / `homeRideInfo` / `analyse`。 |
 | 3 | **ZeehoCustomKey** | 自定义键映射：在 `dbpoint/send` 请求**离机前**把 `commandCode` 强制改写为 **7（切换信息组）** → 仪表主页按自定义键在「里程组 ⇄ 胎压组」间切换，显示前后轮胎压 / 胎温。 |
+| 4 | **ZeehoAccountToken** | 登录凭证提取：只读抓取 `token` + 账号 ID 写入 `$persistentStore`。 |
 
 > **切换语义（#3）**：**启用**脚本 = 所有自定义键设置都被映射为「切换信息组」；**禁用**脚本 = 完全不改写请求，App 行为恢复原厂、零副作用。
 
@@ -30,6 +31,8 @@ cp conf/Zeeho.conf.example conf/Zeeho.conf
 
 # 2. 在 Shadowrocket 中导入 conf/Zeeho.conf，开启 HTTPS 解密，
 #    并启用 ZeehoVehicleType 与 ZeehoRideFill 两个脚本。
+#    需要给 SpeedHunter Android 填登录凭证时，另启用 ZeehoAccountToken，
+#    进一次极核 App 的「我的 → 签到」，在脚本日志中读取 token + userid。
 ```
 
 `conf/Zeeho.conf` 已被 `.gitignore` 忽略（含个人证书）；仅脱敏的 `conf/Zeeho.conf.example` 入库。
@@ -45,6 +48,7 @@ SpeedHunter-iOS/
 │   ├── ZeehoVehicleType.js  # 生产：F1+F2 gate
 │   ├── ZeehoRideFill.js     # 生产：轨迹估算+回填
 │   ├── ZeehoCustomKey.js    # 生产：自定义键→切换信息组（http-request 改写）
+│   ├── ZeehoAccountToken.js # 生产：提取 token + 账号 ID（http-request 只读）
 │   └── debug/
 │       └── ZeehoDebug.js    # 调试探针（默认禁用）
 ├── docs/
@@ -61,6 +65,7 @@ SpeedHunter-iOS/
 - 不上传骑行记录、车辆信息、位置或账号数据；不修改 App、不绕过账号权限、不改变车辆控制逻辑；
 - 速度/事件数据仅用于界面显示，不能替代仪表或作为安全决策依据；**骑行时勿操作手机，也不要依赖本模块读数**；
 - 日志可能含 VIN、骑行记录、账号字段等个人信息——妥善保管且切勿提交（见 `.gitignore`）。
+- `ZeehoAccountToken` 采集的 token 是账号登录凭据，仅存本机 `$persistentStore`，不外发；日志默认打码，仅在你临时开启 `PRINT_FULL_TOKEN` 时输出明文。
 
 ## 非官方声明与许可
 
