@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-12 — ZeehoCustomKey 重做：改包体 + 重算签名（修复「保存不生效」）
+
+- **定位到真实写入点**（App 3.1.0 实抓）：自定义按键保存走
+  `PUT /v1.0/app/cfmotoserverapp/vehicleSet/propertyOne/one`，
+  体为 `{"relatedFunctions":{},"commond":"142","version":"v2","commondParam":"1","vcu":"<VIN>"}`
+  ——`commond` 是设置项 ID，`commondParam` 才是功能码。旧脚本盯的 `commandCode`
+  与 `dbpoint/send` 在这条链路上根本不存在，故一直空转。
+- **关键修复**：云 API 的 `cfmoto-x-sign` 覆盖请求体
+  （`MD5(hex(SHA-1(sortedQuery + body + cfmoto-x-param + secret)))`），
+  Shadowrocket 在传输层改包体后原签名即失效、服务端会拒。脚本内置纯 JS 的
+  MD5/SHA-1，改写后重算 `cfmoto-x-sign` 与 `signature` 两个头。
+- 脚本改为只拦 `vehicleSet/propertyOne` 且 `commond` ∈ `ITEM_IDS`（默认 `["142"]`），
+  仅改 `commondParam` 一个字段；无可重算签名时放弃改写、原样放行。
+- 新增 `scripts/debug/ZeehoSetProbe.js`（`type=http-response`，默认禁用）：
+  打印 `itemsV2` / `vehicleSetInfo` / `propertyOne` 响应，用于确证设置项 ID 与保存结果。
+- 配置：`ZeehoCustomKey` pattern 收窄为 `.*tapi\.zeehoev\.com.*vehicleSet/propertyOne.*`，
+  新增 `ZeehoSetProbe` 条目。
+
 ## 2026-11-12 — ZeehoAccountToken：自动提取登录凭证（新增脚本 #4）
 
 - 新增 `scripts/ZeehoAccountToken.js`（`type=http-request`）：从 ZEEHO 请求 URL /
@@ -17,6 +35,9 @@
 - 用途：尚未明确。
 
 ## 2026-10-28 — ZeehoCustomKey：自定义键映射为「切换信息组」（新增脚本 #3）
+
+> 已被上方 2026-11-12 条目取代：`dbpoint/send` + `commandCode` 的判断不成立，
+> 真实写入点是 `vehicleSet/propertyOne` 的 `commondParam`。
 
 - 新增 `scripts/ZeehoCustomKey.js`（`type=http-request`）：在 `dbpoint/send` 请求**离机前**把
   `commandCode` 强制改写为 **7（切换信息组）** → 车端 `SetItem4` 落入 7，仪表主页按自定义键在

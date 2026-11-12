@@ -41,10 +41,13 @@ ZeehoVehicleType = type=http-response,engine=jsc,script-path=scripts/ZeehoVehicl
 # 轨迹估算+回填（生产，默认开）
 ZeehoRideFill = type=http-response,engine=jsc,script-path=scripts/ZeehoRideFill.js,pattern=.*tapi\.zeehoev\.com.*(ridetrack_v2|myRideInfo|homeRideInfo|analyse/analyse).*,max-size=0,requires-body=true,timeout=60,script-update-interval=0,enable=true
 
-# 自定义键映射为「切换信息组」：请求离机前把 commandCode 改写为 7（http-request 改写）
+# 自定义键映射为「切换信息组」：保存离机前把 commondParam（功能码）改写为 7 并重算签名
 # 启用 = 映射生效；禁用 = 完全不改写（原样发出，零副作用）
-# pattern 覆盖两类保存入口：dbpoint/send（通用网关）与 vehicleSet/*（iOS 车辆设置保存）
-ZeehoCustomKey = type=http-request,engine=jsc,script-path=scripts/ZeehoCustomKey.js,pattern=.*tapi\.zeehoev\.com.*(dbpoint/send|vehicleSet).*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=true
+# 只拦单属性写接口 vehicleSet/propertyOne，且仅当 commond=142（自定义按键设置项）时生效
+ZeehoCustomKey = type=http-request,engine=jsc,script-path=scripts/ZeehoCustomKey.js,pattern=.*tapi\.zeehoev\.com.*vehicleSet/propertyOne.*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=true
+
+# 车辆设置响应探针：确认设置项 ID / 保存结果（默认关，排查时临时开）
+ZeehoSetProbe = type=http-response,engine=jsc,script-path=scripts/debug/ZeehoSetProbe.js,pattern=.*tapi\.zeehoev\.com.*vehicleSet/(itemsV2|vehicleSetInfo|propertyOne).*,max-size=0,requires-body=true,timeout=30,script-update-interval=0,enable=false
 
 # 登录凭证提取：抓 token + 账号 ID
 ZeehoAccountToken = type=http-request,engine=jsc,script-path=scripts/ZeehoAccountToken.js,pattern=.*(h5|tapi)\.zeehoev\.com.*,max-size=0,requires-body=false,timeout=30,script-update-interval=0,enable=true

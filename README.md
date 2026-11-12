@@ -8,10 +8,12 @@ iOS 端 Shadowrocket 模块与脚本集合，通过对少量 HTTP 响应做 MITM
 | :-- | :--- | :--- |
 | 1 | **ZeehoVehicleType** | UI 能力闸门：在 `vehicleHomePageV2` / `vehicle/list` 设置 `vehicleKinds = 2` + `cyclingEventStatisticFlag = true` → 显示「骑行分析」入口、极速、加速/急刹/压弯。 |
 | 2 | **ZeehoRideFill** | 由 `ridetrack_v2` 轨迹点估算急刹与压弯次数，用按日缓存回填 `myRideInfo` / `homeRideInfo` / `analyse`。 |
-| 3 | **ZeehoCustomKey** | 自定义键映射：在 `dbpoint/send` 请求**离机前**把 `commandCode` 强制改写为 **7（切换信息组）** → 仪表主页按自定义键在「里程组 ⇄ 胎压组」间切换，显示前后轮胎压 / 胎温。 |
+| 3 | **ZeehoCustomKey** | 自定义键映射：保存离机前把 `vehicleSet/propertyOne` 的 `commondParam`（功能码）强制改写为 **7（切换信息组）**，并重算 `cfmoto-x-sign` → 仪表主页按自定义键在「里程组 ⇄ 胎压组」间切换，显示前后轮胎压 / 胎温。 |
 | 4 | **ZeehoAccountToken** | 登录凭证提取：只读抓取 `token` + 账号 ID 写入 `$persistentStore`。 |
 
 > **切换语义（#3）**：**启用**脚本 = 所有自定义键设置都被映射为「切换信息组」；**禁用**脚本 = 完全不改写请求，App 行为恢复原厂、零副作用。
+>
+> 云 API 的签名覆盖请求体（`MD5(hex(SHA-1(query + body + cfmoto-x-param + secret)))`），改包体必须重签，否则服务端直接拒——脚本内置纯 JS 的 MD5/SHA-1 完成重算，算法已用实抓请求逐字节复现验证。
 
 ## 消融实验
 
@@ -47,10 +49,11 @@ SpeedHunter-iOS/
 ├── scripts/
 │   ├── ZeehoVehicleType.js  # 生产：F1+F2 gate
 │   ├── ZeehoRideFill.js     # 生产：轨迹估算+回填
-│   ├── ZeehoCustomKey.js    # 生产：自定义键→切换信息组（http-request 改写）
+│   ├── ZeehoCustomKey.js    # 生产：自定义键→切换信息组（改包体 + 重算签名）
 │   ├── ZeehoAccountToken.js # 生产：提取 token + 账号 ID（http-request 只读）
 │   └── debug/
-│       └── ZeehoDebug.js    # 调试探针（默认禁用）
+│       ├── ZeehoDebug.js    # 骑行数据探针（默认禁用）
+│       └── ZeehoSetProbe.js # 车辆设置探针：设置项 ID / 保存结果（默认禁用）
 ├── docs/
 │   ├── ablation.md
 │   └── changelog.md
@@ -58,7 +61,7 @@ SpeedHunter-iOS/
 └── .gitignore
 ```
 
-调试探针 `ZeehoDebug.js` 只记录、不改写响应，默认禁用，按需启用。
+调试探针（`scripts/debug/`）只记录、不改写响应，默认禁用，按需启用：`ZeehoDebug.js` 看骑行数据响应，`ZeehoSetProbe.js` 看车辆设置项 ID 与保存结果。
 
 ## 安全与隐私
 
