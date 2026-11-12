@@ -1,20 +1,24 @@
 /*
  * ZeehoCustomKey.js
- * 自定义键强制为「切换信息组（功能码 7）」—— iOS 端 Shadowrocket 等价实现（对应 Android SpeedHunter v4.7/v4.7.1 的 customkey 包）。
+ * 自定义键强制为「切换信息组（功能码 7）」—— iOS 端 Shadowrocket 等价实现，
+ * 对齐 Android SpeedHunter 的 customkey.CustomKeyForce。
  *
- * 机制（与 Android 一致）：
- *   官方 App 保存自定义键时，走 4G 云端（tapi.zeehoev.com 的 dbpoint/send 通用网关，
- *   实测从不走 BLE）。该网关的 body 结构是「外层 {eventId, param, uuid} + 内层 param
- *   是 JSON 字符串」——功能码字段（commandCode / functionCode / keyCode / buttonCode）
- *   实际藏在 param 字符串里。本脚本会先解析 param 再改写，把功能码强制改成 7（切换信息组），
- *   车端 SetItem4 落入 7，仪表主页按自定义键即在「里程组 ⇄ 胎压组」间切换，首页显示前后轮胎压 / 胎温。
+ * 与 Android 模块一致的核心约束（见 CustomKeyForce.java）：
+ *   - 只改写 commandCode 一个 int 字段（车端 SetItem4+0x0f 落入 7 → 仪表切信息组）；
+ *   - functionCode / buttonType 是显示名（字符串），绝不改动，App 界面仍显示用户点的卡片；
+ *   - 命中「含 commandCode 的保存请求」才改写，其余请求原样放行；
+ *   - 整段包 try/catch，任何异常退化为原样放行，绝不阻断保存。
+ *
+ * iOS 差异：无法像 Xposed 那样 hook 内存里的 CustomButtonCode 对象，只能拦截离机前的
+ * HTTP 请求改写。本脚本在请求体（含 dbpoint/send 的嵌套 param JSON 字符串）里查找
+ * commandCode 数值字段并改为 TARGET，保持 int 类型。
  *
  * 开关行为（满足「启用脚本则映射、关闭脚本则不修改」）：
  *   在 Shadowrocket 里【启用】本脚本 = 映射生效；【禁用】本脚本 = 完全不改写（原样发出）。
  *   关闭脚本时本文件根本不执行，零副作用。
  *
  * 安全边界：
- *   - 仅当请求体命中「自定义键上下文」时才改写，绝大多数 dbpoint/send 调用不触碰；
+ *   - 仅当请求体含 commandCode 数值字段时才改写；
  *   - 整段包 try/catch，任何异常退化为「原样放行」，绝不阻断保存；
  *   - 默认 DEBUG=false，不打印请求体（日志可能含 VIN / 账号等敏感字段）。
  */
@@ -28,20 +32,13 @@ var DONE = $done;
 
 var TAG = "[ZeehoKey] ";
 
-// 自定义键上下文标记：命中其一即视为「自定义键保存」请求（避免误伤其它 dbpoint/send）
-// ★ 全部写成无下划线形式：比对前会先把字符串里的 _ - 空格 全部剥掉，
-//   因此 commandCode / command_code / CustomKey / custom_key 一律命中
-var CTX_MARKERS = [
-  "commandcode", "customkey", "custombutton", "buttoncode",
-  "setitem", "keyfunction", "functioncode", "按键", "自定义键", "custombuttoncode"
-];
-
-// 可能承载功能码的字段名（同上去掉下划线后比对）
-var CODE_KEY_HINTS = ["commandcode", "keycode", "buttoncode", "functioncode"];
+// 只针对 commandCode（int）。functionCode 是名字串，不在此列（与 Android 一致）。
+// keyCode / buttonCode 作为数值型兄弟字段一并覆盖（防御不同命名）。
+var CODE_KEY_HINTS = ["commandcode", "keycode", "buttoncode"];
 
 function log(s) { console.log(TAG + s); }
 
-// 归一化：小写 + 剥掉 _ - 空格，让 commandCode / command_code / Command Code 等价
+// 归一化：小写 + 剥掉 _ - 空格，让 commandCode / command_code 等价
 function norm(s) { return ("" + s).toLowerCase().replace(/[_\-\s]/g, ""); }
 
 function isCodeKey(k) {
@@ -52,7 +49,7 @@ function isCodeKey(k) {
   return false;
 }
 
-// 递归查找并改写功能码字段；返回是否命中
+// 递归查找并改写 commandCode 数值字段；返回是否命中
 function rewrite(obj) {
   if (!obj || typeof obj !== "object") return false;
   var hit = false;
@@ -66,13 +63,25 @@ function rewrite(obj) {
     if (!obj.hasOwnProperty(k)) continue;
     var v = obj[k];
     if (isCodeKey(k)) {
-      // 功能码字段：强制改为 TARGET，保持原类型（数字 → 7，字符串 → "7"）
-      var nv = (typeof v === "string") ? ("" + TARGET) : TARGET;
-      if (v !== nv) {
-        log("rewrite " + k + ": " + v + " -> " + nv + "（切换信息组）");
-        obj[k] = nv;
+      // 仅对数值型 code 改写；保持 int（Android 用 setInt，commandCode 恒为 int）
+      if (typeof v === "number") {
+        if (v !== TARGET) {
+          log("commandCode " + v + " -> " + TARGET + "（切换信息组）");
+          obj[k] = TARGET;
+        }
+        hit = true;
+      } else if (typeof v === "string") {
+        // 防御：后端误发字符串型 code（如 "7"）则保持字符串；非数字串（名字）跳过
+        var n = parseInt(v, 10);
+        if (!isNaN(n)) {
+          if (n !== TARGET) {
+            log("commandCode \"" + v + "\" -> \"" + TARGET + "\"（切换信息组）");
+            obj[k] = "" + TARGET;
+          }
+          hit = true;
+        }
+        // 非数字字符串（如 functionCode 的 "VEHICLE_SET"）一律不动
       }
-      hit = true;
     } else if (typeof v === "object" && v !== null) {
       if (rewrite(v)) hit = true;
     } else if (typeof v === "string" && (v.charAt(0) === "{" || v.charAt(0) === "[")) {
@@ -89,14 +98,6 @@ function rewrite(obj) {
   return hit;
 }
 
-function bodyHasContext(bodyStr) {
-  var s = norm(bodyStr);
-  for (var i = 0; i < CTX_MARKERS.length; i++) {
-    if (s.indexOf(CTX_MARKERS[i]) >= 0) return true;
-  }
-  return false;
-}
-
 (function () {
   var url = (REQ && REQ.url) || "";
   var body = (REQ && REQ.body) || "";
@@ -105,27 +106,15 @@ function bodyHasContext(bodyStr) {
     var obj;
     try { obj = JSON.parse(body); } catch (e) { DONE({}); return; }
 
-    var ctx = bodyHasContext(body);
-    if (DEBUG) log("URL=" + url + " CTX=" + ctx + " BODY=" + body.slice(0, 4000));
-
-    if (!ctx) { DONE({}); return; }   // 不是自定义键上下文，原样放行
+    if (DEBUG) log("URL=" + url + " BODY=" + body.slice(0, 4000));
 
     var changed = rewrite(obj);
     if (changed) {
       log("mapped custom-key -> switch-info (7) at " + url);
       DONE({ body: JSON.stringify(obj) });
     } else {
-      // 命中上下文但没找到功能码字段：打印结构便于定位真正的字段名
-      var topKeys = Object.keys(obj).join(",");
-      var innerKeys = "";
-      try {
-        var p = obj.param;
-        if (typeof p === "string") {
-          var pi = JSON.parse(p);
-          innerKeys = " | param keys=" + Object.keys(pi).join(",");
-        }
-      } catch (e) {}
-      log("context matched but no code field found; top keys=[" + topKeys + "]" + innerKeys + "; set DEBUG=true to inspect (URL=" + url + ")");
+      // 无 commandCode 字段：不是自定义键保存，原样放行
+      if (DEBUG) log("no commandCode field; pass-through (URL=" + url + ")");
       DONE({});
     }
   } catch (e) {
