@@ -3,11 +3,17 @@
  * 由 ridetrack_v2 轨迹点估算急刹/压弯次数，按日缓存回填 myRideInfo / homeRideInfo / analyse。
  * 估算函数：countBrakes()（急刹，固定）、countBends()（压弯）；日缓存：accumDay / readDay / writeDay。
  *
- * 调整压弯数据（countBends，参数均在下方 C 对象，改完直接生效）：
- *   C.BEND_COEF        主旋钮，默认 1.00；>1 多计、<1 少计，日常标定只改这一个
+ * ★ 2026-11-16：与 Xposed 端 v4.9.0 算法对齐，参数按车机 IMU 真值标定。
+ * 真值样本：AE7 Pro 47.2km/732点，服务端原值 acc=3 brake=5 bend=13。
+ * 标定结果：countBends=13（cum 15→60）、countBrakes=5（双窗口→逐段减速度，
+ * A_MIN 0.5→1.04、CALIB_FACTOR 2.5→1.0）。两端改动须同步。
+ *
+ * 调整压弯数据（参数均在下方 C 对象）：
+ *   C.BEND_COEF        压弯整体缩放，默认 1.00
+ *   C.BEND_MIN_KM      短行程门槛（km），低于此里程整趟判 0，默认 2.0
  *   C.BEND_V_MIN/MAX   判定压弯的车速区间（仅此区间内计弯）
  *   C.BEND_SEED        起判单点转角阈值；C.BEND_STEP_MAX 超过则视为掉头/锯齿，跳过点
- *   C.BEND_CUM_MIN/MAX 一段同向转角累计角度的下限/上限过滤
+ *   C.BEND_CUM_MIN/MAX 一段同向转角累计角度的下限/上限过滤（下限 60°）
  *   C.BEND_ALLOW_GAP / C.BEND_MERGE_GAP  相邻转弯的间隙容忍与同向合并容差
  *
  * 标定验证：
@@ -24,23 +30,25 @@ var RES = $response;
 var DONE = $done;
 
 var C = {
-  // 急刹参数（固定，不动）
-  V_MIN: 15, WIN_LARGE: 5, WIN_SMALL: 3,
-  DV_LARGE: 15, DV_SMALL: 20, A_MIN: 0.5,
-  MERGE_GAP: 5, MIN_DUR: 1.5,
-  // 压弯参数
+  // 急刹：逐段平均减速度（2026-11-16 与 Xposed BrakeDetector 同步）
+  V_MIN: 15,
+  A_MIN: 1.04, A_MAX: 5.0,   // 减速度阈值 / GPS 跳点上限（m/s²）
+  MERGE_SEC: 10,             // 同一脚刹车的合并间隔（秒）；轨迹 10 秒/点
+  GAP_MS_MAX: 25000,         // 相邻点时间差上限（ms），超过断段
+  // 压弯参数（BEND_CUM_MIN 按车机 IMU 真值标定）
   BEND_V_MIN: 20,
   BEND_V_MAX: 80,
   BEND_SEED: 5,
   BEND_STEP_MAX: 45,
-  BEND_CUM_MIN: 15,
+  BEND_CUM_MIN: 60,
+  BEND_MIN_KM: 2.0,
   BEND_CUM_CAP: 90,
   BEND_RUN_MIN: 1,
   BEND_ALLOW_GAP: 0,
   BEND_MERGE_GAP: 0,
   BEND_SEG_DIST_MIN: 6,
   BEND_GAP_MS_MAX: 25000,
-  CALIB_FACTOR: 2.5,
+  CALIB_FACTOR: 1.0,   // 不再是 2.5；急刹按时间合并去重，不放大
   BEND_COEF: 1.00,
   LOG: true,
   // DEBUG 默认 false，标定参数时手动打开
@@ -88,36 +96,27 @@ function distM(lon1, lat1, lon2, lat2) {
   return R * c;
 }
 
-// ---- 急刹 countBrakes（固定）----
+// ---- 急刹 countBrakes（逐段平均减速度）----
+// 与 Xposed BrakeDetector.java 逐行等价，2026-11-16 车机 IMU 真值标定：
+// AE7 Pro 47.2km/732点 原厂 brake=5，算法输出 5（旧双窗口算法输出 70）。
 function countBrakes(pts) {
-  var n = pts.length; if (n < 4) return 0;
-  var cands = [], i, j;
-  function scan(win, dvMin) {
-    for (var i = 0; i <= n - win; i++) {
-      if (pts[i].v < C.V_MIN) continue;
-      var maxV = -Infinity, maxIdx = i, minV = Infinity, minIdx = i;
-      for (var j = i + 1; j <= i + win && j < n; j++) {
-        if (pts[j].v > maxV) { maxV = pts[j].v; maxIdx = j; }
-        if (pts[j].v < minV) { minV = pts[j].v; minIdx = j; }
-      }
-      var dv = maxV - minV;
-      if (dv < dvMin) continue;
-      if (minIdx <= maxIdx) continue;
-      var dt = (pts[minIdx].t - pts[maxIdx].t) / 1000;
-      if (dt < C.MIN_DUR) continue;
-      if (dv / 3.6 / dt < C.A_MIN) continue;
-      cands.push({ idx: maxIdx, dv: dv });
+  var n = pts.length; if (n < 2) return 0;
+  var hits = [], i;
+  for (i = 0; i < n - 1; i++) {
+    var dt = (pts[i + 1].t - pts[i].t) / 1000;
+    if (dt <= 0 || dt * 1000 > C.GAP_MS_MAX) continue;
+    if (pts[i].v < C.V_MIN) continue;
+    var a = (pts[i + 1].v - pts[i].v) / 3.6 / dt;
+    if (a > -C.A_MIN) continue;      // 不够急
+    if (a < -C.A_MAX) continue;      // GPS 跳点
+    var t = pts[i + 1].t;
+    if (hits.length === 0 || (t - hits[hits.length - 1].t) / 1000 > C.MERGE_SEC) {
+      hits.push({ t: t, a: a });
+    } else if (a < hits[hits.length - 1].a) {
+      hits[hits.length - 1] = { t: t, a: a };   // 同一脚取最急的一段
     }
   }
-  scan(C.WIN_LARGE, C.DV_LARGE);
-  scan(C.WIN_SMALL, C.DV_SMALL);
-  cands.sort(function (a, b) { return a.idx - b.idx; });
-  var merged = [];
-  for (i = 0; i < cands.length; i++) {
-    if (merged.length === 0 || cands[i].idx - merged[merged.length - 1].idx >= C.MERGE_GAP) merged.push(cands[i]);
-    else if (cands[i].dv > merged[merged.length - 1].dv) merged[merged.length - 1] = cands[i];
-  }
-  var r = Math.round(merged.length * C.CALIB_FACTOR);
+  var r = Math.round(hits.length * C.CALIB_FACTOR);
   return r < 0 ? 0 : r;
 }
 
@@ -383,6 +382,12 @@ function fillFromCache(entries, sourceName) {
             if (pts.length < 4) continue;
             var b = countBrakes(pts);
             var bd = countBends(pts);
+            // 短行程整趟判 0（与 Xposed RideConfig.bendMinKm 一致）
+            var meters = 0;
+            for (var q = 1; q < pts.length; q++) {
+              meters += distM(pts[q - 1].lon, pts[q - 1].lat, pts[q].lon, pts[q].lat);
+            }
+            if (meters / 1000 < C.BEND_MIN_KM) bd = 0;
             if (b >= 0) { r.brakesTimes = b; filled++; }
             if (bd >= 0) { r.bendingTimes = bd; filled++; }
             var dayStr = r.dayTime || day;

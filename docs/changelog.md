@@ -1,4 +1,28 @@
+## 2026-11-16 — RideFill 算法与 Xposed v4.9.0 同步（IMU 真值标定）
+
+- **压弯** `BEND_CUM_MIN` 15 → **60**；新增 `BEND_MIN_KM=2.0`（短行程整趟判 0）。
+  依据 AE7 Pro 47.2km 长骑车机 IMU 原值 `bendingTimes=13`：同轨迹 cum=15 算出 66 次，
+  cum=60 精确 13 次，命中 run 累计转角全在 62–89°（完整大弯）。
+- **急刹算法重写**：废除双窗口 Δv + `CALIB_FACTOR=2.5`，改为逐段物理平均减速度
+  （`A_MIN=1.04` / `A_MAX=5.0` / `MERGE_SEC=10` / `GAP_MS_MAX=25000`），
+  `CALIB_FACTOR=1.0`。旧算法在同一样本算出 70 次（真值 5），新算法精确 5 次。
+- **加速不回填**：`accelerationTimes` 是车机 IMU 上报事件数，GPS 无法复刻，保持服务端真值。
+- 新增桩测 `scripts/debug/test_ride_calibration.js`（Shadowrocket 全局桩 + 真值样本），
+  `node .../test_ride_calibration.js` 输出 `brake=5 / bend=13` → PASS。
+- 标定口径：一律以链接 `ridetrack_v2` 服务端原值为真值，App 界面值可能被回填污染。
+
 # Changelog
+
+## 2026-11-12 — ZeehoVehicleModel：主页车模替换（新增脚本）
+
+- 新增 `scripts/ZeehoVehicleModel.js`（`type=http-response`，默认禁用）：脚本顶部
+  `ART_PIC_2D` / `ART_PIC_3D` 两个变量手动填 URL（可选 `ART_THEME_RGB`），
+  在 `vehicleHomePageV2` / `vehicle/list` 响应里替换 `vehiclePicUrl` /
+  `vehiclePic3dUrl` / `vehicleScalePicUrl`（保留原 OSS resize 参数）/ `appThemeRgb`。
+- 依据 SpeedHunter 同日 DEX 定案：主页车辆视觉全由 MyCarHomePageRsp 的 URL 字段驱动，
+  CFFilamentView#loadUrl 按 URL 加载 3D 模型、颜色内嵌于 glb 材质，APK 无内置车模。
+- 变量全空时直接放行（零开销）。conf 新增 `ZeehoVehicleModel` 条目（enable=false，
+  填好 URL 后在 Shadowrocket 里启用）。
 
 ## 2026-11-12 — ZeehoCustomKey 重做：改包体 + 重算签名（修复「保存不生效」）
 
