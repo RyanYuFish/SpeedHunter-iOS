@@ -3,7 +3,7 @@
  * 由 ridetrack_v2 轨迹点估算急刹/压弯次数，按日缓存回填 myRideInfo / homeRideInfo / analyse。
  * 估算函数：countBrakes()（急刹，固定）、countBends()（压弯）；日缓存：accumDay / readDay / writeDay。
  *
- * ★ 2026-11-18 多样本标定：与 Xposed 端 v5.1.0 算法对齐。
+ * ★ 2026-11-18 多样本标定：
  * 样本：AE7 Pro 账号 6 趟长骑（2.0/6.2/8.7/24.5/26.3/47.2 km），以服务端
  * brake/bend 真值总误差最小定参（单样本 47.2km 精确命中被让位）：
  *   压弯 CUM_MIN 60→50、MIN_KM 2.0→3.0（5 趟 ≥3km 总|err| 23→15；V_MIN 20 不变）
