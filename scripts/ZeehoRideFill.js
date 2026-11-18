@@ -296,45 +296,9 @@ function patchGate(v) {
   if (v.cyclingEventStatisticFlag !== undefined) v.cyclingEventStatisticFlag = true;
 }
 
-// 深度扫描响应树里的原始 cyclingEventStatisticFlag（须在 patchGate 改写前调用）。
-// 返回 true/false = 响应明示；null = 本响应没带该字段。
-function scanStatsFlag(node) {
-  if (!node || typeof node !== "object") return null;
-  if (Array.isArray(node)) {
-    for (var i = 0; i < node.length; i++) {
-      var h = scanStatsFlag(node[i]);
-      if (h !== null) return h;
-    }
-    return null;
-  }
-  if (typeof node.cyclingEventStatisticFlag === "boolean") {
-    return node.cyclingEventStatisticFlag;
-  }
-  for (var k in node) {
-    if (!node.hasOwnProperty(k)) continue;
-    var h2 = scanStatsFlag(node[k]);
-    if (h2 !== null) return h2;
-  }
-  return null;
-}
-
-// 车型门控（2026-11-18 车主令）：服务器原生统计 brake/bend 的车型（AE7 类）不回填。
-// 判据优先级：当前响应原始 flag > URL 里的 VIN 前缀 > persistentStore 记忆值。
-function detectNativeStats(obj, url) {
-  var flag = scanStatsFlag(obj);
-  if (flag !== null) {
-    try { PS.write(flag ? "1" : "0", "zeeho_native_stats"); } catch (e) {}
-    return { native: flag, src: "flag" };
-  }
-  if (url.indexOf("LCETHGD") > -1) return { native: true, src: "vin" };
-  if (url.indexOf("3581225") > -1) return { native: false, src: "vin" };
-  try {
-    var rem = PS.read("zeeho_native_stats");
-    if (rem === "1") return { native: true, src: "cache" };
-    if (rem === "0") return { native: false, src: "cache" };
-  } catch (e) {}
-  return { native: false, src: "default" };
-}
+// 【已撤回】2026-11-18 16:01 车主令「撤回 ios 回填门控」：detectNativeStats /
+// scanStatsFlag（flag > VIN > persistentStore 记忆的车型判定）整体删除，
+// 急刹/压弯回填不再做任何门控，一律执行。
 
 // ---- day store ----
 function dayKey(day) { return "zeeho_day_" + day; }
@@ -348,6 +312,24 @@ function readDay(day) {
 function writeDay(day, obj) {
   try { PS.write(JSON.stringify(obj), dayKey(day)); } catch (e) { log("writeDay fail: " + e); }
 }
+// 全店总压弯（本车全生命周期口径，2026-11-18 车主令：总里程旁的压弯 = 本车记录总共压弯次数）。
+// 优先枚举 persistent store 的 zeeho_day_* 键精确求和；运行环境没有 allKeys
+// 时返回 null，调用方退回当前响应（当月）累加值。
+function totalBendsAllTime() {
+  try {
+    if (typeof PS.allKeys !== "function") return null;
+    var ks = PS.allKeys() || [];
+    var tot = 0;
+    for (var i = 0; i < ks.length; i++) {
+      if (String(ks[i]).indexOf("zeeho_day_") !== 0) continue;
+      var st = null;
+      try { st = JSON.parse(PS.read(ks[i]) || "null"); } catch (e) {}
+      if (st && st.d) tot += st.d;
+    }
+    return tot;
+  } catch (e) { return null; }
+}
+
 function accumDay(day, rideId, b, d) {
   var cur = readDay(day);
   if (!cur) cur = { b: 0, d: 0, rides: {} };
@@ -405,13 +387,9 @@ function fillFromCache(entries, sourceName) {
     var d = obj.data;
     if (!d) { DONE({ body: body }); return; }
 
-    // 0. 车型门控（必须在 patchGate 改写能力位之前读原始 flag）
-    var gate = { native: false, src: "default" };
-    try {
-      gate = detectNativeStats(obj, url);
-      log("gate: nativeStats=" + gate.native + " (" + gate.src + ")");
-    } catch (e) { log("gate detect fail: " + e); }
-    var fillEvents = !gate.native;
+    // 0. 回填门控已撤回（2026-11-18 16:01 车主令「撤回 ios 回填门控」）：
+    //    不再做任何车型/flag 判定，急刹/压弯一律回填（恢复门控引入前的行为）。
+    var fillEvents = true;
 
     // 1. Gate
     try {
@@ -441,7 +419,7 @@ function fillFromCache(entries, sourceName) {
               meters += distM(pts[q - 1].lon, pts[q - 1].lat, pts[q].lon, pts[q].lat);
             }
             if (meters / 1000 < C.BEND_MIN_KM) bd = 0;
-            // ★ 车型门控：服务器原生统计的车型不写 b/d、不进 day store
+            // 门控已撤回：无条件写 b/d、进 day store（fillEvents 恒 true，保留变量名少动 diff）
             if (fillEvents) {
               if (b >= 0) { r.brakesTimes = b; filled++; }
               if (bd >= 0) { r.bendingTimes = bd; filled++; }
@@ -477,9 +455,14 @@ function fillFromCache(entries, sourceName) {
           var v = parseInt(lst[t].bendingTimesDay, 10);
           if (!isNaN(v)) sumD += v;
         }
+        // 总里程旁的压弯 = 本车全生命周期总数（day store 全店求和），
+        // 不能只加当前响应月 —— 换月查看时单月和会把总数缩回去。
+        // 无 allKeys 的运行环境退回响应累加值（首次刷新后逐月补齐）。
+        var allD = totalBendsAllTime();
+        if (allD === null || allD <= 0) allD = sumD;
         if (d.bendingTimesTotal !== undefined && isZero(d.bendingTimesTotal)) {
-          d.bendingTimesTotal = String(sumD);
-          log("myRideInfo total: bendingTimesTotal=" + sumD);
+          d.bendingTimesTotal = String(allD);
+          log("myRideInfo total: bendingTimesTotal=" + allD + (allD !== sumD ? " (all-time, month sum=" + sumD + ")" : ""));
         }
       }
     } catch (e) { log("HANDLER ERROR myRideInfo: " + e); }
@@ -501,7 +484,7 @@ function fillFromCache(entries, sourceName) {
             if (sumD2 > 0) d.bendingTimes = String(sumD2);
           }
           log("analyse done: month=" + prefix + " days=" + found + "/31 sumB=" + sumB + " sumD=" + sumD2
-              + (fillEvents ? "" : " [nativeStats: b/d 保持服务端真值]"));
+              ); // 门控已撤回（2026-11-18 16:01 车主令），fillEvents 恒 true
         } else {
           log("analyse: no day store for " + prefix);
         }

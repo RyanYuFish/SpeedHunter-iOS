@@ -1,3 +1,36 @@
+## 2026-11-18（三）— 总压弯改全生命周期口径（与 Xposed v5.2.4 同步，17:27 车主令）
+
+- **口径**：myRideInfo 总里程旁的压弯次数 = **本车记录的总压弯次数**，
+  不再只累加当前响应（当月）—— 换月查看时单月和会把总数缩回。
+- 新增 `totalBendsAllTime()`：`$persistentStore.allKeys` 可用时枚举
+  `zeeho_day_*` 键逐个 `JSON.parse` 累加 `st.d`；无 `allKeys` / 异常时返回
+  null，调用方退回当月累加值（诚实边界：极少数无 allKeys 的运行环境需
+  逐月重刷后全量才准）。
+- 写 `bendingTimesTotal` 用 `max(全生命周期值, 当月和)`；guard 不变仍为
+  字段存在且为 0 才写。日志 `myRideInfo total: bendingTimesTotal=N
+  (all-time, month sum=M)`。
+- 桩测 `test_ride_calibration.js` PASS（brake=2 bend=17）；参数不变。
+
+## 2026-11-18（二）— 撤回回填门控（16:01 车主令）
+
+- **门控整体撤回**：删除 `detectNativeStats()` / `scanStatsFlag()`（响应
+  flag > URL VIN 前缀 > `$persistentStore` 记忆的车型判定链，当日上午引入、
+  下午收紧），`fillEvents` 恒 `true` —— 急刹/压弯**一律回填**，恢复门控引入前
+  行为。`zeeho_native_stats` 遗留持久键不再读写。
+- 参数与算法不动（A_MIN=1.20 / BEND_CUM_MIN=50 / BEND_MIN_KM=3.0）；
+  桩测 `test_ride_calibration.js` PASS（brake=2 bend=17）。
+- Android 端同令改为「云端是否下发总压弯次数」数据判据（v5.2.1），iOS 端
+  按令不做门控 —— 两端行为差异是车主明示选择。
+
+## 2026-11-18 — 回填门控收紧（与 Xposed v5.2.0 同步）
+
+- **门控默认值收紧**（车主 14:16 令）：`detectNativeStats()` 判据链末端的
+  **默认分支从「回填」改为「不回填」**（`{ native: true, src: "default" }`）；
+  调用处异常兜底同步。即：仅当服务器明示 `cyclingEventStatisticFlag`、或
+  VIN 前缀确认 AE7（`LCETHGD`）/AE5i（`3581225`）、或 `$persistentStore`
+  有明示缓存时才判定；**未知车型默认不回填**，与 Android `!isAe5i()` 兜底
+  语义一致（iOS 无 VIN 车型库，故默认保守）。
+
 ## 2026-11-18 — RideFill 多样本定参 + 车型门控（与 Xposed v5.1.0 同步）
 
 - **压弯参数**：`BEND_CUM_MIN` 60 → **50**、`BEND_MIN_KM` 2.0 → **3.0**；
