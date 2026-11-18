@@ -3,17 +3,22 @@
  * 由 ridetrack_v2 轨迹点估算急刹/压弯次数，按日缓存回填 myRideInfo / homeRideInfo / analyse。
  * 估算函数：countBrakes()（急刹，固定）、countBends()（压弯）；日缓存：accumDay / readDay / writeDay。
  *
- * ★ 2026-11-16：与 Xposed 端 v4.9.0 算法对齐，参数按车机 IMU 真值标定。
- * 真值样本：AE7 Pro 47.2km/732点，服务端原值 acc=3 brake=5 bend=13。
- * 标定结果：countBends=13（cum 15→60）、countBrakes=5（双窗口→逐段减速度，
- * A_MIN 0.5→1.04、CALIB_FACTOR 2.5→1.0）。两端改动须同步。
+ * ★ 2026-11-18 多样本标定：与 Xposed 端 v5.1.0 算法对齐。
+ * 样本：AE7 Pro 账号 6 趟长骑（2.0/6.2/8.7/24.5/26.3/47.2 km），以服务端
+ * brake/bend 真值总误差最小定参（单样本 47.2km 精确命中被让位）：
+ *   压弯 CUM_MIN 60→50、MIN_KM 2.0→3.0（5 趟 ≥3km 总|err| 23→15；V_MIN 20 不变）
+ *   急刹 A_MIN 1.04→1.20（总|err| 9→5）
+ * 注：定参扫描用 tools/ride/eval_traj.py（Java 严格复刻）为准；早先 /tmp 扫描
+ * 脚本变体得出的 25/45 在权威实现下 err=18，已废弃。
+ * ★ 车型门控：服务器原生统计 brake/bend 的车型（cyclingEventStatisticFlag=true，
+ * 如 AE7）不回填 b/d —— GPS 近似值不覆盖车机 IMU 真值；AE5i 类（flag=false）才回填。
  *
  * 调整压弯数据（参数均在下方 C 对象）：
  *   C.BEND_COEF        压弯整体缩放，默认 1.00
- *   C.BEND_MIN_KM      短行程门槛（km），低于此里程整趟判 0，默认 2.0
+ *   C.BEND_MIN_KM      短行程门槛（km），低于此里程整趟判 0，默认 3.0
  *   C.BEND_V_MIN/MAX   判定压弯的车速区间（仅此区间内计弯）
  *   C.BEND_SEED        起判单点转角阈值；C.BEND_STEP_MAX 超过则视为掉头/锯齿，跳过点
- *   C.BEND_CUM_MIN/MAX 一段同向转角累计角度的下限/上限过滤（下限 60°）
+ *   C.BEND_CUM_MIN/MAX 一段同向转角累计角度的下限/上限过滤（下限 50°）
  *   C.BEND_ALLOW_GAP / C.BEND_MERGE_GAP  相邻转弯的间隙容忍与同向合并容差
  *
  * 标定验证：
@@ -30,18 +35,18 @@ var RES = $response;
 var DONE = $done;
 
 var C = {
-  // 急刹：逐段平均减速度（2026-11-16 与 Xposed BrakeDetector 同步）
+  // 急刹：逐段平均减速度（2026-11-18 多样本标定，与 Xposed BrakeDetector 同步）
   V_MIN: 15,
-  A_MIN: 1.04, A_MAX: 5.0,   // 减速度阈值 / GPS 跳点上限（m/s²）
+  A_MIN: 1.20, A_MAX: 5.0,   // 减速度阈值 / GPS 跳点上限（m/s²）
   MERGE_SEC: 10,             // 同一脚刹车的合并间隔（秒）；轨迹 10 秒/点
   GAP_MS_MAX: 25000,         // 相邻点时间差上限（ms），超过断段
-  // 压弯参数（BEND_CUM_MIN 按车机 IMU 真值标定）
+  // 压弯参数（2026-11-18 多样本标定：5 趟 ≥3km 总|err| 23→15）
   BEND_V_MIN: 20,
   BEND_V_MAX: 80,
   BEND_SEED: 5,
   BEND_STEP_MAX: 45,
-  BEND_CUM_MIN: 60,
-  BEND_MIN_KM: 2.0,
+  BEND_CUM_MIN: 50,
+  BEND_MIN_KM: 3.0,
   BEND_CUM_CAP: 90,
   BEND_RUN_MIN: 1,
   BEND_ALLOW_GAP: 0,
@@ -291,6 +296,46 @@ function patchGate(v) {
   if (v.cyclingEventStatisticFlag !== undefined) v.cyclingEventStatisticFlag = true;
 }
 
+// 深度扫描响应树里的原始 cyclingEventStatisticFlag（须在 patchGate 改写前调用）。
+// 返回 true/false = 响应明示；null = 本响应没带该字段。
+function scanStatsFlag(node) {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (var i = 0; i < node.length; i++) {
+      var h = scanStatsFlag(node[i]);
+      if (h !== null) return h;
+    }
+    return null;
+  }
+  if (typeof node.cyclingEventStatisticFlag === "boolean") {
+    return node.cyclingEventStatisticFlag;
+  }
+  for (var k in node) {
+    if (!node.hasOwnProperty(k)) continue;
+    var h2 = scanStatsFlag(node[k]);
+    if (h2 !== null) return h2;
+  }
+  return null;
+}
+
+// 车型门控（2026-11-18 车主令）：服务器原生统计 brake/bend 的车型（AE7 类）不回填。
+// 判据优先级：当前响应原始 flag > URL 里的 VIN 前缀 > persistentStore 记忆值。
+function detectNativeStats(obj, url) {
+  var flag = scanStatsFlag(obj);
+  if (flag !== null) {
+    try { PS.write(flag ? "1" : "0", "zeeho_native_stats"); } catch (e) {}
+    return { native: flag, src: "flag" };
+  }
+  if (url.indexOf("LCETHGD") > -1) return { native: true, src: "vin" };
+  if (url.indexOf("3581225") > -1) return { native: false, src: "vin" };
+  try {
+    var rem = PS.read("zeeho_native_stats");
+    if (rem === "1") return { native: true, src: "cache" };
+    if (rem === "0") return { native: false, src: "cache" };
+  } catch (e) {}
+  return { native: false, src: "default" };
+}
+
 // ---- day store ----
 function dayKey(day) { return "zeeho_day_" + day; }
 function readDay(day) {
@@ -360,6 +405,14 @@ function fillFromCache(entries, sourceName) {
     var d = obj.data;
     if (!d) { DONE({ body: body }); return; }
 
+    // 0. 车型门控（必须在 patchGate 改写能力位之前读原始 flag）
+    var gate = { native: false, src: "default" };
+    try {
+      gate = detectNativeStats(obj, url);
+      log("gate: nativeStats=" + gate.native + " (" + gate.src + ")");
+    } catch (e) { log("gate detect fail: " + e); }
+    var fillEvents = !gate.native;
+
     // 1. Gate
     try {
       if (url.indexOf("vehicleHomePageV2") > -1 || url.indexOf("vehicle/list") > -1) {
@@ -388,10 +441,13 @@ function fillFromCache(entries, sourceName) {
               meters += distM(pts[q - 1].lon, pts[q - 1].lat, pts[q].lon, pts[q].lat);
             }
             if (meters / 1000 < C.BEND_MIN_KM) bd = 0;
-            if (b >= 0) { r.brakesTimes = b; filled++; }
-            if (bd >= 0) { r.bendingTimes = bd; filled++; }
-            var dayStr = r.dayTime || day;
-            if (dayStr) accumDay(dayStr, r.rideId, b, bd);
+            // ★ 车型门控：服务器原生统计的车型不写 b/d、不进 day store
+            if (fillEvents) {
+              if (b >= 0) { r.brakesTimes = b; filled++; }
+              if (bd >= 0) { r.bendingTimes = bd; filled++; }
+              var dayStr = r.dayTime || day;
+              if (dayStr) accumDay(dayStr, r.rideId, b, bd);
+            }
             var startTime = r.startTime || r.recordTime || r.start_time || "";
             debugPrint(pts, r.rideId, bd, startTime);
           }
@@ -410,6 +466,7 @@ function fillFromCache(entries, sourceName) {
           if (!day2) continue;
           var st = readDay(day2);
           if (!st) continue;
+          if (!fillEvents) continue;
           if (st.b >= 0) { rec.brakesTimesDay = String(st.b); nFill++; }
           if (st.d >= 0) { rec.bendingTimesDay = String(st.d); nFill++; }
         }
@@ -439,9 +496,12 @@ function fillFromCache(entries, sourceName) {
           if (st2) { sumB += st2.b; sumD2 += st2.d; found++; }
         }
         if (found > 0) {
-          if (sumB > 0) d.brakesTimes = String(sumB);
-          if (sumD2 > 0) d.bendingTimes = String(sumD2);
-          log("analyse done: month=" + prefix + " days=" + found + "/31 sumB=" + sumB + " sumD=" + sumD2);
+          if (fillEvents) {
+            if (sumB > 0) d.brakesTimes = String(sumB);
+            if (sumD2 > 0) d.bendingTimes = String(sumD2);
+          }
+          log("analyse done: month=" + prefix + " days=" + found + "/31 sumB=" + sumB + " sumD=" + sumD2
+              + (fillEvents ? "" : " [nativeStats: b/d 保持服务端真值]"));
         } else {
           log("analyse: no day store for " + prefix);
         }

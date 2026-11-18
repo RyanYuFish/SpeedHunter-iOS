@@ -1,3 +1,21 @@
+## 2026-11-18 — RideFill 多样本定参 + 车型门控（与 Xposed v5.1.0 同步）
+
+- **压弯参数**：`BEND_CUM_MIN` 60 → **50**、`BEND_MIN_KM` 2.0 → **3.0**；
+  `BEND_V_MIN` 维持 20。依据账号 11 月 6 趟 ≥2 km 长骑服务端真值，以
+  `tools/ride/eval_traj.py`（权威评估器，两端实现逐值一致）定参：
+  5 趟 ≥3 km 压弯总 |err| 23→15（预测 15/3/1/11/17 vs 真值 23/3/2/13/13）、
+  急刹 9→5。旧 60/1.04 只精确命中其标定样本（47.2 km），其余趟系统性偏。
+- **急刹参数**：`A_MIN` 1.04 → **1.20**（1.19–1.21 误差平台取中点）。
+- **车型门控**（车主令）：新增 `detectNativeStats()` —— 当前响应原始
+  `cyclingEventStatisticFlag` > URL VIN 前缀（`LCETHGD`=AE7 / `3581225`=AE5i）
+  > `$persistentStore` 记忆（`zeeho_native_stats`）> 默认回填；在 `patchGate`
+  改写能力位之前执行。判定为原生统计车型（AE7 类）时**不回填**
+  brakesTimes/bendingTimes（ridetrack 写入 / myRideInfo / analyse / day store
+  四处全部门控）；AE5i 类行为不变。
+- **桩测期望更新**：47.2 km 样本期望从 5/13 改为 **brake=2 / bend=17**
+  （该样本让位于多样本总误差最小；桩测锁两端一致，不锁真值命中）。
+- 标定详情：`SpeedHunter/docs/features/ride-calibration.md` §10/§11。
+
 ## 2026-11-16 — RideFill 算法与 Xposed v4.9.0 同步（IMU 真值标定）
 
 - **压弯** `BEND_CUM_MIN` 15 → **60**；新增 `BEND_MIN_KM=2.0`（短行程整趟判 0）。

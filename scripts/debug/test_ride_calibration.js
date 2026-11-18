@@ -5,6 +5,12 @@
  * 样本：AE7 Pro 2026-11-16 18:02:46，47.2 km / 732 点 / 121.7 min
  * 服务端原值：accelerationTimes=3, brakesTimes=5, bendingTimes=13
  *
+ * ★ 2026-11-18 多样本定参后，本样本期望值改为 brake=2 / bend=17：
+ *   参数以 6 趟长骑总误差最小为准（权威评估器 eval_traj.py：压弯 5 趟 ≥3km
+ *   总|err| 23→15、急刹 9→5），47.2km 单样本不再精确命中（旧参数 5/13 是过拟合）。
+ *   此期望值用于锁两端一致；若改动算法导致本样本输出变化，
+ *   须重跑 tools/ride/eval_traj.py 全样本复核。
+ *
  * 用法：node SpeedHunter-iOS/scripts/debug/test_ride_calibration.js [轨迹JSON]
  * 默认轨迹文件：/tmp/ae7_long.json（由 tools/ride/eval_traj.py 生成）
  */
@@ -52,14 +58,16 @@ let bends = F.countBends(pts);
 if (meters / 1000 < F.C.BEND_MIN_KM) bends = 0;
 
 const ref = data.ref;
+// 2026-11-18 多样本定参后的期望输出（brake=2 / bend=17，见文件头注释）
+const exp = { brake: 2, bend: 17 };
 console.log('=== iOS ZeehoRideFill 算法桩测 ===');
 console.log('样本: ' + (data.meta ? data.meta.start : trajFile) +
   '  pts=' + pts.length + '  km=' + (meters / 1000).toFixed(1));
 console.log('参数: A_MIN=' + F.C.A_MIN + ' BEND_CUM_MIN=' + F.C.BEND_CUM_MIN +
   ' CALIB_FACTOR=' + F.C.CALIB_FACTOR + ' BEND_MIN_KM=' + F.C.BEND_MIN_KM);
-console.log('真值: accel=' + ref.acc + ' brake=' + ref.brake + ' bend=' + ref.bend);
-console.log('算法: accel=不回填(服务端真值) brake=' + brakes + ' bend=' + bends);
-const okBrake = brakes === ref.brake, okBend = bends === ref.bend;
+console.log('服务端真值: accel=' + ref.acc + ' brake=' + ref.brake + ' bend=' + ref.bend);
+console.log('算法输出: accel=不回填(服务端真值) brake=' + brakes + ' bend=' + bends);
+const okBrake = brakes === exp.brake, okBend = bends === exp.bend;
 console.log('结果: ' + (okBrake && okBend ? 'PASS' : 'FAIL') +
-  (okBrake ? '' : ' [brake 不符]') + (okBend ? '' : ' [bend 不符]'));
+  (okBrake ? '' : ' [brake≠' + exp.brake + ']') + (okBend ? '' : ' [bend≠' + exp.bend + ']'));
 process.exit(okBrake && okBend ? 0 : 1);
